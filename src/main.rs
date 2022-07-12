@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::FutureExt;
 use hyper::http::response::Builder;
 use hyper::Body;
 use mendes::application::{IntoResponse, Server};
@@ -6,6 +7,7 @@ use mendes::http::{request::Parts, Response, StatusCode};
 use mendes::{handler, Application, Context};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 mod autnum;
 mod catchall;
@@ -18,15 +20,20 @@ const ALLOWED_RESOURCES: [&str; 5] = ["ip", "domain", "autnum", "nameserver", "e
 
 #[macro_export]
 macro_rules! endpoint {
-    ($cx:ident, $mod:tt) => {{
-        use mendes::http::Method;
-        match $cx.method() {
-            &Method::HEAD => $mod::head::handler(&mut $cx).await,
-            &Method::GET => $mod::get::handler(&mut $cx).await,
-            _ => invalid_path(),
+    ($cx:expr, $mod:tt) => {
+        async {
+            use mendes::http::Method;
+            let mut cx = $cx.write().await;
+
+            match cx.method() {
+                &Method::HEAD => $mod::head::handler(&mut cx).await,
+                &Method::GET => $mod::get::handler(&mut cx).await,
+                _ => invalid_path(),
+            }
+            .into_response(cx.app.as_ref(), &cx.req)
         }
-        .into_response($cx.app.as_ref(), &$cx.req)
-    }};
+        .boxed()
+    };
 }
 
 #[macro_export]
@@ -103,16 +110,27 @@ impl Application for App {
     type Error = Error;
 
     async fn handle(mut cx: Context<Self>) -> Response<Body> {
-        let path = match cx.path() {
-            None => return invalid_path().into_response(cx.app.as_ref(), &cx.req),
-            Some(p) => p.to_owned().to_string(),
-        };
+        let req_path = cx.req.uri.path().to_string();
 
-        match path.as_str() {
-            "rdap" => endpoint!(cx, catchall),
-            "rdap/autnum" => endpoint!(cx, autnum),
-            _ => invalid_path().into_response(cx.app.as_ref(), &cx.req),
+        // skip root /rdap
+        let _ = cx.path();
+
+        let cx = Arc::new(tokio::sync::RwLock::new(cx));
+        let context = cx.clone();
+
+        let paths = vec![
+            ("/rdap/autnum", endpoint!(cx, autnum)),
+            ("/rdap", endpoint!(cx, catchall)),
+        ];
+
+        for (base, handler) in paths {
+            if req_path.starts_with(base) {
+                return handler.await;
+            }
         }
+
+        let cx = context.read().await;
+        invalid_path().into_response(cx.app.as_ref(), &cx.req)
     }
 }
 
