@@ -18,7 +18,7 @@ fn find_asn(app: &App, resource: String, asn: u32) -> Result<AutNum> {
         let start_asn = aut.start_autnum.unwrap_or(0);
         let end_asn = aut.end_autnum.unwrap_or(start_asn);
 
-        if start_asn <= asn && asn <= end_asn {
+        if (start_asn <= asn && asn <= end_asn) || aut.handle == format!("AS{}", asn) {
             return Ok(aut);
         }
     }

@@ -96,10 +96,12 @@ impl App {
         &self,
         path: impl AsRef<Path>,
     ) -> Result<impl Iterator<Item = serde_json::Value>> {
-        Ok(std::fs::read_dir(self.dir.join(path))?.filter_map(|f| {
-            let f = std::fs::File::open(f.ok()?.path()).ok()?;
-            serde_json::from_reader(f).ok()
-        }))
+        Ok(
+            std::fs::read_dir(self.dir.join("rdap").join(path))?.filter_map(|f| {
+                let f = std::fs::File::open(f.ok()?.path()).ok()?;
+                serde_json::from_reader(f).ok()
+            }),
+        )
     }
 }
 
