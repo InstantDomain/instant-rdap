@@ -3,22 +3,37 @@ use hyper::http::response::Builder;
 use hyper::Body;
 use mendes::application::{IntoResponse, Server};
 use mendes::http::{request::Parts, Response, StatusCode};
-use mendes::{handler, route, Application, Context};
+use mendes::{handler, Application, Context};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+mod autnum;
+mod catchall;
+
+type RestResponse = Result<Response<Body>>;
 type Result<T> = std::result::Result<T, Error>;
 const ALLOWED_RESOURCES: [&str; 5] = ["ip", "domain", "autnum", "nameserver", "entity"];
 
 // #[query] opts: std::collections::HashMap<String, String>,
 
+#[macro_export]
+macro_rules! endpoint {
+    ($cx:ident, $mod:tt) => {{
+        use mendes::http::Method;
+        match $cx.method() {
+            &Method::HEAD => $mod::head::handler(&mut $cx).await,
+            &Method::GET => $mod::get::handler(&mut $cx).await,
+            _ => invalid_path(),
+        }
+        .into_response($cx.app.as_ref(), &$cx.req)
+    }};
+}
+
+#[macro_export]
 macro_rules! validate_file {
     ($contents:ident, $ty:ty) => {
         serde_json::to_string_pretty(&serde_json::from_str::<$ty>(&$contents)?)?
     };
-}
-
-fn invalid_path() -> Result<Response<Body>> {
-    Err(Error::Mendes(mendes::Error::MethodNotAllowed))
 }
 
 fn response() -> Builder {
@@ -27,35 +42,19 @@ fn response() -> Builder {
         .status(StatusCode::OK)
 }
 
-#[handler(HEAD)]
-async fn head(app: &App, parts: &Parts) -> Result<Response<Body>> {
-    app.file_exists(&parts.uri.path()[1..])?;
+fn invalid_path() -> RestResponse {
+    Err(Error::Mendes(mendes::Error::MethodNotAllowed))
+}
 
+pub fn ok_body(obj: impl Serialize) -> RestResponse {
+    Ok(response().body(Body::from(serde_json::to_string(&obj)?))?)
+}
+
+pub fn ok_head() -> RestResponse {
     Ok(response().body(Body::empty())?)
 }
 
-#[handler(GET)]
-async fn get(app: &App, parts: &Parts, resource: String) -> Result<Response<Body>> {
-    if !ALLOWED_RESOURCES.contains(&resource.as_str()) {
-        Err(mendes::Error::PathNotFound)?
-    }
-
-    let path = &parts.uri.path()[1..];
-    let contents = app.read_file(path).await?;
-
-    let body = match resource.as_str() {
-        "ip" => validate_file!(contents, rdap_types::IpNetwork),
-        "domain" => validate_file!(contents, rdap_types::Domain),
-        "autnum" => validate_file!(contents, rdap_types::AutNum),
-        "nameserver" => validate_file!(contents, rdap_types::Nameserver),
-        "entity" => validate_file!(contents, rdap_types::Entity),
-        _ => return invalid_path(),
-    };
-
-    Ok(response().body(Body::from(body))?)
-}
-
-struct App {
+pub struct App {
     dir: PathBuf,
 }
 
@@ -79,14 +78,21 @@ impl App {
     }
 
     async fn read_file(&self, path_segment: impl AsRef<Path>) -> Result<String> {
-        println!("{:?}", path_segment.as_ref());
         Ok(tokio::fs::read_to_string(self.dir.join(path_segment))
             .await
             .map_err(|_| mendes::Error::PathNotFound)?)
     }
 
-    async fn search_in_json(&self, path: PathBuf) -> Result<String> {
-        todo!()
+    // this really should be async, but typing through Stream<Item =
+    // Value> transformations is a lot of work
+    fn search_in_json(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<impl Iterator<Item = serde_json::Value>> {
+        Ok(std::fs::read_dir(self.dir.join(path))?.filter_map(|f| {
+            let f = std::fs::File::open(f.ok()?.path()).ok()?;
+            serde_json::from_reader(f).ok()
+        }))
     }
 }
 
@@ -97,17 +103,21 @@ impl Application for App {
     type Error = Error;
 
     async fn handle(mut cx: Context<Self>) -> Response<Body> {
-        route!(match cx.path() {
-            Some("rdap") => match cx.method() {
-                HEAD => head,
-                GET => get,
-            },
-        })
+        let path = match cx.path() {
+            None => return invalid_path().into_response(cx.app.as_ref(), &cx.req),
+            Some(p) => p.to_owned().to_string(),
+        };
+
+        match path.as_str() {
+            "rdap" => endpoint!(cx, catchall),
+            "rdap/autnum" => endpoint!(cx, autnum),
+            _ => invalid_path().into_response(cx.app.as_ref(), &cx.req),
+        }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-enum Error {
+pub enum Error {
     #[error("Decode")]
     Serde(#[from] serde_json::Error),
     #[error("HTTP")]
