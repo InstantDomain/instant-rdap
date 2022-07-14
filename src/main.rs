@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod autnum;
-mod catchall;
+mod exact_match;
+mod ip;
+mod query;
 
 type RestResponse = Result<Response<Body>>;
 type Result<T> = std::result::Result<T, Error>;
@@ -122,7 +124,11 @@ impl Application for App {
 
         let paths = vec![
             ("/rdap/autnum", endpoint!(cx, autnum)),
-            ("/rdap", endpoint!(cx, catchall)),
+            ("/rdap/ip", endpoint!(cx, ip)),
+            ("/rdap/nameservers", endpoint!(cx, query)),
+            ("/rdap/domains", endpoint!(cx, query)),
+            ("/rdap/entities", endpoint!(cx, query)),
+            ("/rdap", endpoint!(cx, exact_match)),
         ];
 
         for (base, handler) in paths {
@@ -146,12 +152,15 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Mendes(#[from] mendes::Error),
+    #[error("error")]
+    Status(StatusCode),
 }
 
 impl From<&Error> for StatusCode {
     fn from(e: &Error) -> StatusCode {
         match e {
             Error::Mendes(e) => StatusCode::from(e),
+            Error::Status(code) => *code,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

@@ -17,11 +17,10 @@ pub async fn get(app: &App, parts: &Parts, resource: String) -> RestResponse {
     let contents = app.read_file(path).await?;
 
     let body = match resource.as_str() {
-        "ip" => validate_file!(contents, rdap_types::IpNetwork),
         "domain" => validate_file!(contents, rdap_types::Domain),
         "nameserver" => validate_file!(contents, rdap_types::Nameserver),
         "entity" => validate_file!(contents, rdap_types::Entity),
-        _ => return invalid_path(),
+        _ => return Err(Error::Status(StatusCode::NOT_IMPLEMENTED)),
     };
 
     Ok(response().body(Body::from(body))?)
