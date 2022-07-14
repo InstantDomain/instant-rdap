@@ -551,6 +551,7 @@ dependencies = [
 [[package]]
 name = "rdap_types"
 version = "0.1.0"
+source = "git+https://github.com/rsdy/rdap_client#46f1515b57dad75c8876b9a9651cefa1b4878e4c"
 dependencies = [
  "chrono",
  "serde",
