@@ -18,8 +18,6 @@ type RestResponse = Result<Response<Body>>;
 type Result<T> = std::result::Result<T, Error>;
 const ALLOWED_RESOURCES: [&str; 5] = ["ip", "domain", "autnum", "nameserver", "entity"];
 
-// #[query] opts: std::collections::HashMap<String, String>,
-
 #[macro_export]
 macro_rules! endpoint {
     ($cx:expr, $mod:tt) => {
@@ -76,9 +74,12 @@ impl App {
         })
     }
 
-    fn file_exists(&self, path_segment: impl AsRef<Path>) -> Result<()> {
-        let path = self.dir.join(&path_segment);
+    fn file_exists(&self, resource: &str, handle: &str) -> Result<()> {
+        if !ALLOWED_RESOURCES.contains(&resource) {
+            Err(mendes::Error::PathNotFound)?
+        }
 
+        let path = self.dir.join("rdap").join(resource).join(handle);
         if path.exists() && path.is_file() {
             Ok(())
         } else {
@@ -86,8 +87,13 @@ impl App {
         }
     }
 
-    async fn read_file(&self, path_segment: impl AsRef<Path>) -> Result<String> {
-        Ok(tokio::fs::read_to_string(self.dir.join(path_segment))
+    async fn read_file(&self, resource: &str, handle: &str) -> Result<String> {
+        if !ALLOWED_RESOURCES.contains(&resource) {
+            Err(mendes::Error::PathNotFound)?
+        }
+
+        let path = self.dir.join("rdap").join(resource).join(handle);
+        Ok(tokio::fs::read_to_string(path)
             .await
             .map_err(|_| mendes::Error::PathNotFound)?)
     }
