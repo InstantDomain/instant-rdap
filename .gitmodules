@@ -1,0 +1,3 @@
+[submodule "rdap-conformance-tool"]
+	path = rdap-conformance-tool
+	url = ./rdap-conformance-tool/
