@@ -15,7 +15,7 @@ run_test() {
 	)
 
 	success=$?
-	echo "$success: test of $i"
+	echo "$success: test of $1"
 
 	export tool_params="--use-local-datasets"
 }
@@ -31,10 +31,13 @@ for i in rdap/domain/* rdap/nameserver/* rdap/entity/*; do
 	run_test $i
 done
 
-run_test rdap/ip/193.0.0.0
-run_test rdap/ip/193.0.0.0/24
-run_test rdap/ip/3.3.3.3
-run_test rdap/ip/2001:db8::
-run_test rdap/ip/2001:db8::0
+# The conformance tool doesn't support IP or search queries.
+# Leaving these here for reference.
+#
+#run_test rdap/ip/193.0.0.0
+#run_test rdap/ip/193.0.0.0/24
+#run_test rdap/ip/3.3.3.3
+#run_test rdap/ip/2001:db8::
+#run_test rdap/ip/2001:db8::0
 
 kill $pid
