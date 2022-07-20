@@ -1,3 +1,4 @@
+use crate::db::ToRdap;
 use crate::*;
 
 macro_rules! get_path {
@@ -26,6 +27,7 @@ pub async fn get(app: &App, resource: String, handle: String) -> RestResponse {
     match resource.as_str() {
         "domain" => get_path!(app, path, db::Whois),
         "nameserver" => get_path!(app, path, db::Nameserver),
+        "entity" => get_path!(app, path, serde_json::Value),
         _ => Err(NOT_IMPLEMENTED),
     }
 }

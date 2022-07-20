@@ -3,6 +3,21 @@ use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
+#[async_trait]
+pub trait ToRdap {
+    type Rdap: Serialize;
+    async fn to_rdap(self, app: &App) -> Result<Self::Rdap>;
+}
+
+#[async_trait]
+impl ToRdap for serde_json::Value {
+    type Rdap = Self;
+
+    async fn to_rdap(self, _app: &App) -> Result<Self::Rdap> {
+        Ok(self)
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Whois {
     pub created_at: DateTime<Utc>,
@@ -14,8 +29,11 @@ pub struct Whois {
     pub ldh_name: String,
 }
 
-impl Whois {
-    pub async fn to_rdap(self, app: &App) -> Result<rdap_types::Domain> {
+#[async_trait]
+impl ToRdap for Whois {
+    type Rdap = rdap_types::Domain;
+
+    async fn to_rdap(self, app: &App) -> Result<rdap_types::Domain> {
         let mut events = rdap_types::Events(vec![rdap_types::Event {
             event_action: rdap_types::EventAction::Registration,
             event_date: self.created_at.into(),
@@ -91,8 +109,11 @@ pub struct Nameserver {
     status: Option<Vec<rdap_types::Status>>,
 }
 
-impl Nameserver {
-    pub async fn to_rdap(self, app: &App) -> Result<rdap_types::Nameserver> {
+#[async_trait]
+impl ToRdap for Nameserver {
+    type Rdap = rdap_types::Nameserver;
+
+    async fn to_rdap(self, app: &App) -> Result<rdap_types::Nameserver> {
         let link = format!("{}/nameserver/{}", app.url_root(), self.ldh_name);
         let links = vec![rdap_types::Link {
             value: Some(link.clone()),
