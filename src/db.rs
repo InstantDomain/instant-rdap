@@ -3,6 +3,22 @@ use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
+async fn get_list_from<T: DeserializeOwned>(
+    app: &App,
+    list: &[String],
+    resource: &str,
+) -> Result<Vec<T>> {
+    app.db()
+        .get::<T>(
+            &list
+                .iter()
+                .map(|ns| format!("/{}/{}", resource, ns))
+                .collect::<Vec<_>>(),
+            Default::default(),
+        )
+        .await
+}
+
 #[async_trait]
 pub trait ToRdap {
     type Rdap: Serialize;
@@ -18,11 +34,20 @@ impl ToRdap for serde_json::Value {
     }
 }
 
+#[async_trait]
+impl ToRdap for rdap_types::Entity {
+    type Rdap = Self;
+
+    async fn to_rdap(self, _app: &App) -> Result<Self::Rdap> {
+        Ok(self)
+    }
+}
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Whois {
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub name_servers: Vec<String>,
+    pub entities: Vec<String>,
     pub status: Option<Vec<rdap_types::Status>>,
     pub dnssec: Option<rdap_types::SecureDns>,
     pub unicode_name: String,
@@ -51,15 +76,7 @@ impl ToRdap for Whois {
         }
 
         let nameservers = futures_util::future::join_all(
-            app.db()
-                .get::<Nameserver>(
-                    &self
-                        .name_servers
-                        .iter()
-                        .map(|ns| format!("/nameserver/{}", ns))
-                        .collect::<Vec<_>>(),
-                    Default::default(),
-                )
+            get_list_from::<Nameserver>(app, &self.name_servers, "nameserver")
                 .await?
                 .into_iter()
                 .map(|ns| ns.to_rdap(app)),
@@ -68,11 +85,13 @@ impl ToRdap for Whois {
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
 
-        let link = format!("{}/domain/{}", app.url_root(), self.ldh_name);
+        let entities = get_list_from::<rdap_types::Entity>(app, &self.entities, "entity").await?;
+
+        let href = format!("{}/domain/{}", app.url_root(), self.ldh_name);
         let links = vec![rdap_types::Link {
-            value: Some(link.clone()),
+            value: Some(href.clone()),
             rel: Some("self".into()),
-            href: link.clone(),
+            href,
             hreflang: Some(vec!["en".into()]),
             title: None,
             media: None,
@@ -81,9 +100,9 @@ impl ToRdap for Whois {
 
         Ok(rdap_types::Domain {
             events,
+            entities,
             object_class_name: "domain".into(),
             status: self.status,
-            entities: vec![],
             secure_dns: self.dnssec,
             handle: Some(self.ldh_name),
             nameservers: Some(nameservers),
@@ -107,6 +126,7 @@ pub struct Nameserver {
     unicode_name: String,
     ip_addresses: rdap_types::IpAddresses,
     status: Option<Vec<rdap_types::Status>>,
+    entities: Vec<String>,
 }
 
 #[async_trait]
@@ -114,11 +134,20 @@ impl ToRdap for Nameserver {
     type Rdap = rdap_types::Nameserver;
 
     async fn to_rdap(self, app: &App) -> Result<rdap_types::Nameserver> {
-        let link = format!("{}/nameserver/{}", app.url_root(), self.ldh_name);
+        let href = format!("{}/nameserver/{}", app.url_root(), self.ldh_name);
+        let entities = {
+            let deser = get_list_from::<rdap_types::Entity>(app, &self.entities, "entity").await?;
+            if deser.is_empty() {
+                None
+            } else {
+                Some(deser)
+            }
+        };
+
         let links = vec![rdap_types::Link {
-            value: Some(link.clone()),
+            value: Some(href.clone()),
             rel: Some("self".into()),
-            href: link.clone(),
+            href,
             hreflang: Some(vec!["en".into()]),
             title: None,
             media: None,
@@ -126,13 +155,13 @@ impl ToRdap for Nameserver {
         }];
 
         Ok(rdap_types::Nameserver {
+            entities,
             object_class_name: "nameserver".into(),
             handle: Some(self.ldh_name.clone()),
             ldh_name: self.ldh_name,
             unicode_name: Some(self.unicode_name),
             ip_addresses: Some(self.ip_addresses),
             status: Some(vec![rdap_types::Status::Active]),
-            entities: None,
             remarks: None,
             notices: None,
             links: Some(links),

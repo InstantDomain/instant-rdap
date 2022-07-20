@@ -27,7 +27,7 @@ pub async fn get(app: &App, resource: String, handle: String) -> RestResponse {
     match resource.as_str() {
         "domain" => get_path!(app, path, db::Whois),
         "nameserver" => get_path!(app, path, db::Nameserver),
-        "entity" => get_path!(app, path, serde_json::Value),
+        "entity" => get_path!(app, path, rdap_types::Entity),
         _ => Err(NOT_IMPLEMENTED),
     }
 }
