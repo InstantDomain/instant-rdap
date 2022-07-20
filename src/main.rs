@@ -6,17 +6,18 @@ use mendes::application::{IntoResponse, Server};
 use mendes::http::{request::Parts, Response, StatusCode};
 use mendes::{handler, Application, Context};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod autnum;
+mod db;
 mod exact_match;
 mod ip;
 mod query;
 
 type RestResponse = Result<Response<Body>>;
 type Result<T> = std::result::Result<T, Error>;
-const ALLOWED_RESOURCES: [&str; 5] = ["ip", "domain", "autnum", "nameserver", "entity"];
+const NOT_IMPLEMENTED: Error = Error::Status(StatusCode::NOT_IMPLEMENTED);
+const NOT_FOUND: Error = Error::Status(StatusCode::NOT_FOUND);
 
 #[macro_export]
 macro_rules! endpoint {
@@ -28,7 +29,7 @@ macro_rules! endpoint {
             match cx.method() {
                 &Method::HEAD => $mod::head::handler(&mut cx).await,
                 &Method::GET => $mod::get::handler(&mut cx).await,
-                _ => invalid_path(),
+                _ => Err(NOT_FOUND),
             }
             .into_response(cx.app.as_ref(), &cx.req)
         }
@@ -49,10 +50,6 @@ fn response() -> Builder {
         .status(StatusCode::OK)
 }
 
-fn invalid_path() -> RestResponse {
-    Err(Error::Mendes(mendes::Error::MethodNotAllowed))
-}
-
 pub fn ok_body(obj: impl Serialize) -> RestResponse {
     Ok(response().body(Body::from(serde_json::to_string(&obj)?))?)
 }
@@ -62,54 +59,30 @@ pub fn ok_head() -> RestResponse {
 }
 
 pub struct App {
-    dir: PathBuf,
+    url_root: String,
+    port43: String,
+    db: db::Redis,
 }
 
 impl App {
-    fn with_path(dir: impl AsRef<Path>) -> std::result::Result<App, Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(&dir)?;
-
-        Ok(App {
-            dir: dir.as_ref().to_owned(),
-        })
+    pub fn rdap_conformance(&self) -> Vec<String> {
+        vec!["rdap_level_0".into()]
     }
 
-    fn file_exists(&self, resource: &str, handle: &str) -> Result<()> {
-        if !ALLOWED_RESOURCES.contains(&resource) {
-            Err(mendes::Error::PathNotFound)?
-        }
-
-        let path = self.dir.join("rdap").join(resource).join(handle);
-        if path.exists() && path.is_file() {
-            Ok(())
-        } else {
-            Err(mendes::Error::PathNotFound)?
-        }
+    pub fn content_type(&self) -> String {
+        "application/rdap+json".into()
     }
 
-    async fn read_file(&self, resource: &str, handle: &str) -> Result<String> {
-        if !ALLOWED_RESOURCES.contains(&resource) {
-            Err(mendes::Error::PathNotFound)?
-        }
-
-        let path = self.dir.join("rdap").join(resource).join(handle);
-        Ok(tokio::fs::read_to_string(path)
-            .await
-            .map_err(|_| mendes::Error::PathNotFound)?)
+    pub fn port43(&self) -> &str {
+        self.port43.as_ref()
     }
 
-    // this really should be async, but typing through Stream<Item =
-    // Value> transformations is a lot of work
-    fn search_in_json(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<impl Iterator<Item = serde_json::Value>> {
-        Ok(
-            std::fs::read_dir(self.dir.join("rdap").join(path))?.filter_map(|f| {
-                let f = std::fs::File::open(f.ok()?.path()).ok()?;
-                serde_json::from_reader(f).ok()
-            }),
-        )
+    pub fn url_root(&self) -> &str {
+        self.url_root.as_ref()
+    }
+
+    pub fn db(&self) -> &db::Redis {
+        &self.db
     }
 }
 
@@ -144,12 +117,14 @@ impl Application for App {
         }
 
         let cx = context.read().await;
-        invalid_path().into_response(cx.app.as_ref(), &cx.req)
+        NOT_FOUND.into_response(cx.app.as_ref(), &cx.req)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("redis")]
+    Redis(#[from] redis::RedisError),
     #[error("Decode")]
     Serde(#[from] serde_json::Error),
     #[error("HTTP")]
@@ -183,9 +158,12 @@ impl IntoResponse<App> for Error {
 
 #[tokio::main]
 async fn main() {
-    App::with_path("./")
-        .unwrap()
-        .serve(&"0.0.0.0:11000".parse().unwrap())
-        .await
-        .unwrap();
+    App {
+        db: db::Redis::new("redis://localhost").await.unwrap(),
+        port43: "localhost".to_owned(),
+        url_root: "https://localhost".to_owned(),
+    }
+    .serve(&"0.0.0.0:11000".parse().unwrap())
+    .await
+    .unwrap();
 }

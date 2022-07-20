@@ -35,24 +35,26 @@ fn parse_net(path: impl AsRef<str>) -> Result<IpNet> {
 }
 
 fn find_network(app: &App, resource: &str, ip: ipnet::IpNet) -> Result<IpNetwork> {
-    let mut result = Err(Error::Mendes(mendes::Error::PathNotFound));
-    let mut size = u128::MAX;
+    todo!()
 
-    for json in app.search_in_json(resource)? {
-        let ipn: IpNetwork = serde_json::from_value(json)?;
+    // let mut result = Err(Error::Mendes(mendes::Error::PathNotFound));
+    // let mut size = u128::MAX;
 
-        let (net, net_size) = match (ipn.start_address, ipn.end_address) {
-            (IpAddr::V4(start), IpAddr::V4(end)) => get_net_and_size!(start, end, 32),
-            (IpAddr::V6(start), IpAddr::V6(end)) => get_net_and_size!(start, end, 128),
-            _ => continue,
-        };
+    // for json in app.search_in_json(resource)? {
+    //     let ipn: IpNetwork = serde_json::from_value(json)?;
 
-        let query_size = ip.hosts().count() as u128;
+    //     let (net, net_size) = match (ipn.start_address, ipn.end_address) {
+    //         (IpAddr::V4(start), IpAddr::V4(end)) => get_net_and_size!(start, end, 32),
+    //         (IpAddr::V6(start), IpAddr::V6(end)) => get_net_and_size!(start, end, 128),
+    //         _ => continue,
+    //     };
 
-        if net.contains(&ip.network()) && net_size >= query_size && net_size < size {
-            size = net_size;
-            result = Ok(ipn);
-        }
-    }
-    result
+    //     let query_size = ip.hosts().count() as u128;
+
+    //     if net.contains(&ip.network()) && net_size >= query_size && net_size < size {
+    //         size = net_size;
+    //         result = Ok(ipn);
+    //     }
+    // }
+    // result
 }

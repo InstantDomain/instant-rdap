@@ -1,22 +1,31 @@
 use crate::*;
 
+macro_rules! get_path {
+    ($app:ident, $path:ident, $ty:ty) => {
+        ok_body(
+            $app.db()
+                .get::<$ty>(&[$path], Default::default())
+                .await?
+                .pop()
+                .ok_or_else(|| Error::Mendes(mendes::Error::PathNotFound))?
+                .to_rdap($app)
+                .await?,
+        )
+    };
+}
+
 #[handler(HEAD)]
 pub async fn head(app: &App, resource: String, handle: String) -> RestResponse {
-    app.file_exists(&resource, &handle)?;
-
-    ok_head()
+    get::call(app, resource, handle).map(|_| ok_head()).await
 }
 
 #[handler(GET)]
 pub async fn get(app: &App, resource: String, handle: String) -> RestResponse {
-    let contents = app.read_file(&resource, &handle).await?;
+    let path = format!("/{}/{}", resource, handle);
 
-    let body = match resource.as_str() {
-        "domain" => validate_file!(contents, rdap_types::Domain),
-        "nameserver" => validate_file!(contents, rdap_types::Nameserver),
-        "entity" => validate_file!(contents, rdap_types::Entity),
-        _ => return Err(Error::Status(StatusCode::NOT_IMPLEMENTED)),
-    };
-
-    Ok(response().body(Body::from(body))?)
+    match resource.as_str() {
+        "domain" => get_path!(app, path, db::Whois),
+        "nameserver" => get_path!(app, path, db::Nameserver),
+        _ => Err(NOT_IMPLEMENTED),
+    }
 }
