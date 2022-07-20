@@ -18,13 +18,15 @@ macro_rules! get_net_and_size {
 }
 
 #[handler(HEAD)]
-pub async fn head(app: &App, resource: String, #[rest] ip: Cow<'_, str>) -> RestResponse {
-    find_network(app, &resource, parse_net(ip)?).and_then(|_| ok_head())
+pub async fn head(app: &App, _resource: String, #[rest] ip: Cow<'_, str>) -> RestResponse {
+    find_network(app, parse_net(ip)?)
+        .await
+        .and_then(|_| ok_head())
 }
 
 #[handler(GET)]
-pub async fn get(app: &App, resource: String, #[rest] ip: Cow<'_, str>) -> RestResponse {
-    find_network(app, &resource, parse_net(ip)?).and_then(ok_body)
+pub async fn get(app: &App, _resource: String, #[rest] ip: Cow<'_, str>) -> RestResponse {
+    find_network(app, parse_net(ip)?).await.and_then(ok_body)
 }
 
 fn parse_net(path: impl AsRef<str>) -> Result<IpNet> {
@@ -34,27 +36,25 @@ fn parse_net(path: impl AsRef<str>) -> Result<IpNet> {
         .map_err(|_: Box<dyn std::error::Error>| Error::Mendes(mendes::Error::PathDecode))
 }
 
-fn find_network(app: &App, resource: &str, ip: ipnet::IpNet) -> Result<IpNetwork> {
-    todo!()
+async fn find_network(app: &App, ip: ipnet::IpNet) -> Result<IpNetwork> {
+    let mut result = Err(Error::Mendes(mendes::Error::PathNotFound));
+    let mut size = u128::MAX;
 
-    // let mut result = Err(Error::Mendes(mendes::Error::PathNotFound));
-    // let mut size = u128::MAX;
+    for json in app.db.get(&["/ip/*".into()], Default::default()).await? {
+        let ipn: IpNetwork = serde_json::from_value(json)?;
 
-    // for json in app.search_in_json(resource)? {
-    //     let ipn: IpNetwork = serde_json::from_value(json)?;
+        let (net, net_size) = match (ipn.start_address, ipn.end_address) {
+            (IpAddr::V4(start), IpAddr::V4(end)) => get_net_and_size!(start, end, 32),
+            (IpAddr::V6(start), IpAddr::V6(end)) => get_net_and_size!(start, end, 128),
+            _ => continue,
+        };
 
-    //     let (net, net_size) = match (ipn.start_address, ipn.end_address) {
-    //         (IpAddr::V4(start), IpAddr::V4(end)) => get_net_and_size!(start, end, 32),
-    //         (IpAddr::V6(start), IpAddr::V6(end)) => get_net_and_size!(start, end, 128),
-    //         _ => continue,
-    //     };
+        let query_size = ip.hosts().count() as u128;
 
-    //     let query_size = ip.hosts().count() as u128;
-
-    //     if net.contains(&ip.network()) && net_size >= query_size && net_size < size {
-    //         size = net_size;
-    //         result = Ok(ipn);
-    //     }
-    // }
-    // result
+        if net.contains(&ip.network()) && net_size >= query_size && net_size < size {
+            size = net_size;
+            result = Ok(ipn);
+        }
+    }
+    result
 }
